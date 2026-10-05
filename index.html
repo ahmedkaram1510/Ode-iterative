@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ODE Solver: Euler, Runge-Kutta & Taylor</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/11.8.0/math.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f3f4f6; }
+.katex-display { margin: 0.4em 0; overflow-x: auto; overflow-y: hidden; padding-bottom: 5px; }
+table { border-collapse: collapse; width: 100%; text-align: center; margin-top: 10px; background: white; }
+th, td { border: 1px solid #d1d5db; padding: 8px; }
+th { background-color: #e5e7eb; font-weight: 600; color: #374151; }
+tr:nth-child(even) { background-color: #f9fafb; }
+tr.final td { background-color: #dcfce7; font-weight: 600; }
+details > summary { cursor: pointer; list-style: none; }
+details > summary::-webkit-details-marker { display: none; }
+details > summary::before { content: '▸'; display: inline-block; width: 1.1em; transition: transform .15s; }
+details[open] > summary::before { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) { details > summary::before { transition: none; } }
+</style>
+</head>
+<body class="text-gray-800 p-4 md:p-8 min-h-screen flex flex-col items-center">
+<div class="max-w-6xl w-full bg-white rounded-xl shadow-lg overflow-hidden">
+
+<div class="bg-blue-700 p-6 text-white text-center">
+    <h1 class="text-3xl font-bold">Initial Value Problems</h1>
+    <p class="mt-2 opacity-90 text-sm">Euler, Modified Euler, Runge-Kutta 4 & Taylor Series</p>
+</div>
+
+<div class="p-6 grid grid-cols-1 lg:grid-cols-3 gap-8">
+
+<!-- Inputs -->
+<div class="lg:col-span-1 space-y-5 bg-gray-50 p-6 rounded-lg border border-gray-200 shadow-sm h-fit">
+    <h2 class="text-xl font-semibold mb-4 border-b pb-2">Inputs</h2>
+
+    <div>
+        <label class="block text-sm font-medium mb-1">Equation type</label>
+        <select id="orderSelect" class="w-full border border-gray-300 rounded p-2" onchange="updateOrder(true)">
+            <option value="1">First order: y′ = f(x, y)</option>
+            <option value="2">Second order: y″ = f(x, y, y′)</option>
+        </select>
+    </div>
+
+    <div>
+        <label id="funcLabel" class="block text-sm font-medium mb-1">y′ = f(x, y) =</label>
+        <input type="text" id="funcStr" class="w-full border border-gray-300 rounded p-2 focus:ring-2 focus:ring-blue-500 focus:outline-none font-mono">
+        <p id="funcHint" class="text-xs text-gray-500 mt-1"></p>
+    </div>
+
+    <div class="grid grid-cols-2 gap-4">
+        <div>
+            <label class="block text-sm font-medium mb-1">x₀</label>
+            <input type="number" id="x0" step="any" class="w-full border border-gray-300 rounded p-2">
+        </div>
+        <div>
+            <label class="block text-sm font-medium mb-1">y(x₀)</label>
+            <input type="number" id="y0" step="any" class="w-full border border-gray-300 rounded p-2">
+        </div>
+        <div id="yp0Box" class="hidden col-span-2">
+            <label class="block text-sm font-medium mb-1">y′(x₀)</label>
+            <input type="number" id="yp0" step="any" class="w-full border border-gray-300 rounded p-2">
+        </div>
+        <div>
+            <label class="block text-sm font-medium mb-1">Step size h</label>
+            <input type="number" id="hInput" step="any" min="0" class="w-full border border-gray-300 rounded p-2">
+        </div>
+        <div>
+            <label class="block text-sm font-medium mb-1">Find y at x =</label>
+            <input type="number" id="xEnd" step="any" class="w-full border border-gray-300 rounded p-2">
+        </div>
+    </div>
+    <p id="stepsHint" class="text-xs text-blue-600 font-medium -mt-2"></p>
+
+    <div>
+        <label class="block text-sm font-medium mb-1">Method</label>
+        <select id="methodSelect" class="w-full border border-gray-300 rounded p-2"></select>
+    </div>
+
+    <div>
+        <label class="block text-sm font-medium mb-1">Exact solution y(x) <span class="text-gray-400 font-normal">(optional)</span></label>
+        <input type="text" id="exactStr" class="w-full border border-gray-300 rounded p-2 focus:ring-2 focus:ring-blue-500 focus:outline-none font-mono">
+        <p class="text-xs text-gray-500 mt-1">Leave empty if you don't know it. When given, the error of each method is shown.</p>
+    </div>
+
+    <div>
+        <label class="block text-sm font-medium mb-1">Decimal places shown</label>
+        <input type="number" id="decInput" value="4" min="1" max="10" class="w-full border border-gray-300 rounded p-2">
+    </div>
+
+    <button onclick="solve()" class="w-full bg-blue-700 hover:bg-blue-800 text-white font-bold py-3 px-4 rounded transition duration-200 shadow">Solve</button>
+    <div id="errorBox" class="hidden mt-4 p-3 bg-red-100 text-red-700 rounded text-sm font-medium border border-red-200"></div>
+</div>
+
+<!-- Results -->
+<div class="lg:col-span-2 space-y-6">
+    <div id="resultsContainer" class="hidden">
+        <h2 class="text-xl font-semibold mb-4 border-b pb-2">Step-by-Step Solution</h2>
+
+        <div class="mb-5">
+            <h3 class="font-medium text-gray-700 mb-2">1. Method formula:</h3>
+            <div id="formulaBox" class="space-y-3"></div>
+        </div>
+
+        <div id="derivSection" class="mb-5 hidden">
+            <h3 class="font-medium text-gray-700 mb-2">2. Differentiate the ODE (Taylor only, done once):</h3>
+            <div id="derivBox" class="bg-white p-3 rounded border shadow-sm overflow-x-auto text-lg"></div>
+        </div>
+
+        <div class="mb-5">
+            <h3 class="font-medium text-gray-700 mb-2"><span class="secNum">3</span>. Steps (substitution):</h3>
+            <p class="text-xs text-gray-500 mb-2">Tap a step to open it. Every step starts from the point reached at the end of the previous one.</p>
+            <div id="stepsBox" class="space-y-3"></div>
+        </div>
+
+        <div class="mb-5">
+            <h3 class="font-medium text-gray-700 mb-2"><span class="secNum">4</span>. Results table:</h3>
+            <div id="tableBox" class="overflow-x-auto"></div>
+        </div>
+
+        <div>
+            <h3 class="font-medium text-gray-700 mb-2"><span class="secNum">5</span>. Final answer:</h3>
+            <div id="finalAnswer" class="bg-green-50 p-4 rounded border border-green-200 text-green-900 shadow-sm"></div>
+        </div>
+    </div>
+
+    <div id="placeholderMsg" class="h-full flex items-center justify-center text-gray-400 italic text-center p-10 border-2 border-dashed rounded-xl bg-gray-50">
+        Enter the differential equation and click "Solve" to see each step with colored substitutions, the results table and the graph.
+    </div>
+</div>
+</div>
+
+<div id="graphContainer" class="hidden p-6 md:p-8 border-t border-gray-200 bg-white">
+    <h2 class="text-xl font-semibold mb-2">Approximate Solution Graph</h2>
+    <p id="graphNote" class="text-sm text-gray-500 mb-4"></p>
+    <div class="relative h-96 w-full bg-gray-50 rounded border shadow-inner p-2">
+        <canvas id="odeChart"></canvas>
+    </div>
+</div>
+
+</div>
+
+<script>
+const DEFAULTS = {
+    1: { f: '-2*x*y^2', x0: 0, y0: 1, h: 0.1, xEnd: 0.3, exact: '1/(1+x^2)',
+         hint: "Use * for multiplication and ^ for powers, e.g. -2*x*y^2, x + y, exp(x)*sin(y)." },
+    2: { f: "3*y' - 2*y + 2*x + 1", x0: 0, y0: 4, yp0: 4, h: 0.1, xEnd: 0.1, exact: 'exp(x) + exp(2x) + x + 2',
+         hint: "Write y′ as y'. Example: 3*y' - 2*y + 2*x + 1 means y″ = 3y′ − 2y + 2x + 1." }
+};
+const METHODS = {
+    1: [['euler', 'Euler'], ['meuler', 'Modified Euler'], ['rk4', 'Runge-Kutta 4'], ['taylor2', 'Taylor (second order)'],
+        ['taylor3', 'Taylor (third order)'], ['all', 'Compare all methods']],
+    2: [['taylor2', 'Taylor (second order)'], ['taylor3', 'Taylor (third order)'], ['all', 'Compare both']]
+};
+const NAME = { euler: 'Euler', meuler: 'Modified Euler', rk4: 'Runge-Kutta 4', taylor2: 'Taylor (2nd order)', taylor3: 'Taylor (3rd order)' };
+const COLOR = { euler: '#ea580c', meuler: '#2563eb', rk4: '#9333ea', taylor2: '#0d9488', taylor3: '#be185d' };
+const C_IN = '#1d4ed8', C_MID = '#7c3aed', C_RES = '#b91c1c';
+let myChart = null;
+
+// ---------- helpers ----------
+function dec() { const d = parseInt(document.getElementById('decInput').value); return isNaN(d) ? 4 : Math.min(Math.max(d, 1), 10); }
+function fmt(v, d = dec()) {
+    if (!isFinite(v)) return String(v);
+    let s = parseFloat(v.toFixed(d)).toString();
+    if (s.includes('e')) s = v.toPrecision(4);
+    return s === '-0' ? '0' : s;
+}
+function p(v) { const s = fmt(v); return v < 0 ? `(${s})` : s; }              // wrap negatives
+function col(c, s) { return String.raw`\textcolor{${c}}{${s}}`; }
+function res(v) { return col(C_RES, String.raw`\mathbf{${fmt(v)}}`); }
+function renderMath(el, tex, display = true) {
+    if (typeof el === 'string') el = document.getElementById(el);
+    katex.render(tex, el, { throwOnError: false, displayMode: display });
+}
+function showError(msg) {
+    const b = document.getElementById('errorBox');
+    b.textContent = msg; b.style.display = 'block';
+    document.getElementById('resultsContainer').classList.add('hidden');
+    document.getElementById('graphContainer').classList.add('hidden');
+    document.getElementById('placeholderMsg').classList.remove('hidden');
+}
+function hideError() { document.getElementById('errorBox').style.display = 'none'; }
+function order() { return parseInt(document.getElementById('orderSelect').value); }
+function clean(s) { return s.replace(/y''/g, 'ypp').replace(/y'/g, 'yp').replace(/y″/g, 'ypp').replace(/y′/g, 'yp'); }
+const texHandler = (node) => {
+    if (node.type === 'SymbolNode') {
+        if (node.name === 'yp') return "{y'}";
+        if (node.name === 'ypp') return "{y''}";
+    }
+};
+function toTex(node) {
+    let t = node.toTex({ handler: texHandler, implicit: 'hide', parenthesis: 'auto' });
+    t = t.replace(/\\cdot\s*(?=[a-zA-Z{\\(])/g, '\\,');                                   // 2x instead of 2·x
+    t = t.replace(/-\\left\(((?:(?!\\left|\\right|[+-]).)*)\\right\)/g, '-$1');          // -(2y^2) -> -2y^2
+    return t;
+}
+function simp(str) { try { return math.simplify(str); } catch (e) { return math.parse(str); } }
+
+function updateOrder(reset) {
+    const o = order(), d = DEFAULTS[o];
+    document.getElementById('funcLabel').textContent = o === 1 ? 'y′ = f(x, y) =' : 'y″ = f(x, y, y′) =';
+    document.getElementById('funcHint').textContent = d.hint;
+    document.getElementById('yp0Box').classList.toggle('hidden', o === 1);
+    if (reset) {
+        document.getElementById('funcStr').value = d.f;
+        document.getElementById('x0').value = d.x0;
+        document.getElementById('y0').value = d.y0;
+        document.getElementById('yp0').value = d.yp0 ?? 0;
+        document.getElementById('hInput').value = d.h;
+        document.getElementById('xEnd').value = d.xEnd;
+        document.getElementById('exactStr').value = d.exact;
+    }
+    document.getElementById('methodSelect').innerHTML = METHODS[o].map(([v, t]) => `<option value="${v}">${t}</option>`).join('');
+    updateStepsHint();
+}
+function updateStepsHint() {
+    const x0 = parseFloat(document.getElementById('x0').value), h = parseFloat(document.getElementById('hInput').value),
+          xe = parseFloat(document.getElementById('xEnd').value);
+    const el = document.getElementById('stepsHint');
+    if ([x0, h, xe].some(isNaN) || h <= 0) { el.textContent = ''; return; }
+    const N = (xe - x0) / h;
+    el.textContent = Math.abs(N - Math.round(N)) < 1e-9 && N > 0
+        ? `Number of steps N = (${xe} − ${x0}) / ${h} = ${Math.round(N)}` : 'x − x₀ must be a whole number of steps h.';
+}
+['x0', 'hInput', 'xEnd'].forEach(id => document.getElementById(id).addEventListener('input', updateStepsHint));
+
+// ---------- method formulas ----------
+function theoryTex(m, o) {
+    if (o === 2) {
+        const third = m === 'taylor3';
+        return String.raw`\begin{aligned}
+        y_{k+1} &= y_k + h\,y'_k + \frac{h^2}{2!}\,y''_k${third ? String.raw` + \frac{h^3}{3!}\,y'''_k` : ''}\\
+        y'_{k+1} &= y'_k + h\,y''_k${third ? String.raw` + \frac{h^2}{2!}\,y'''_k` : ''}
+        \end{aligned}`;
+    }
+    return {
+        euler: String.raw`y_{k+1} = y_k + h\,f(x_k, y_k)`,
+        meuler: String.raw`\begin{aligned} y^{p}_{k+1} &= y_k + h\,f(x_k, y_k) \quad\text{(predict)}\\ y_{k+1} &= y_k + \frac{h}{2}\Big[f(x_k, y_k) + f(x_{k+1}, y^{p}_{k+1})\Big] \quad\text{(correct)}\end{aligned}`,
+        rk4: String.raw`\begin{aligned} K_1 &= h\,f(x_k, y_k), & K_2 &= h\,f\big(x_k + \tfrac{h}{2},\, y_k + \tfrac{K_1}{2}\big)\\ K_3 &= h\,f\big(x_k + \tfrac{h}{2},\, y_k + \tfrac{K_2}{2}\big), & K_4 &= h\,f(x_k + h,\, y_k + K_3)\\ y_{k+1} &= y_k + \tfrac{1}{6}\big(K_1 + 2K_2 + 2K_3 + K_4\big) \end{aligned}`,
+        taylor2: String.raw`y_{k+1} = y_k + h\,y'_k + \frac{h^2}{2!}\,y''_k`,
+        taylor3: String.raw`y_{k+1} = y_k + h\,y'_k + \frac{h^2}{2!}\,y''_k + \frac{h^3}{3!}\,y'''_k`
+    }[m];
+}
+
+// ---------- solvers ----------
+function solveFirst(m, F, D, x0, y0, h, N) {
+    const xs = [x0], ys = [y0], steps = [];
+    let x = x0, y = y0;
+    for (let k = 0; k < N; k++) {
+        const L = [], k1 = k + 1, xn = x0 + (k + 1) * h;
+        let yn;
+        if (m === 'euler') {
+            const f1 = F(x, y);
+            L.push(String.raw`f(x_{${k}}, y_{${k}}) = f(${fmt(x)},\, ${fmt(y)}) = ${col(C_IN, fmt(f1))}`);
+            yn = y + h * f1;
+            L.push(String.raw`y_{${k1}} = ${fmt(y)} + ${fmt(h)}\,${col(C_IN, p(f1))} = ${res(yn)}`);
+        } else if (m === 'meuler') {
+            const f1 = F(x, y), yp = y + h * f1, f2 = F(xn, yp);
+            L.push(String.raw`f(x_{${k}}, y_{${k}}) = f(${fmt(x)},\, ${fmt(y)}) = ${col(C_IN, fmt(f1))}`);
+            L.push(String.raw`y^{p}_{${k1}} = ${fmt(y)} + ${fmt(h)}\,${col(C_IN, p(f1))} = ${col(C_MID, fmt(yp))}`);
+            L.push(String.raw`f(x_{${k1}}, y^{p}_{${k1}}) = f(${fmt(xn)},\, ${col(C_MID, fmt(yp))}) = ${col(C_IN, fmt(f2))}`);
+            yn = y + h / 2 * (f1 + f2);
+            L.push(String.raw`y_{${k1}} = ${fmt(y)} + \frac{${fmt(h)}}{2}\big[${col(C_IN, p(f1))} + ${col(C_IN, p(f2))}\big] = ${res(yn)}`);
+        } else if (m === 'rk4') {
+            const K1 = h * F(x, y);
+            const K2 = h * F(x + h / 2, y + K1 / 2);
+            const K3 = h * F(x + h / 2, y + K2 / 2);
+            const K4 = h * F(x + h, y + K3);
+            L.push(String.raw`K_1 = ${fmt(h)}\,f(${fmt(x)},\, ${fmt(y)}) = ${col(C_IN, fmt(K1))}`);
+            L.push(String.raw`K_2 = ${fmt(h)}\,f(${fmt(x + h / 2)},\, ${fmt(y + K1 / 2)}) = ${col(C_IN, fmt(K2))}`);
+            L.push(String.raw`K_3 = ${fmt(h)}\,f(${fmt(x + h / 2)},\, ${fmt(y + K2 / 2)}) = ${col(C_IN, fmt(K3))}`);
+            L.push(String.raw`K_4 = ${fmt(h)}\,f(${fmt(x + h)},\, ${fmt(y + K3)}) = ${col(C_IN, fmt(K4))}`);
+            yn = y + (K1 + 2 * K2 + 2 * K3 + K4) / 6;
+            L.push(String.raw`y_{${k1}} = ${fmt(y)} + \tfrac{1}{6}\big[${col(C_IN, p(K1))} + 2${col(C_IN, p(K2))} + 2${col(C_IN, p(K3))} + ${col(C_IN, p(K4))}\big] = ${res(yn)}`);
+        } else {
+            const d1 = F(x, y);
+            const d2 = D.y2.evaluate({ x, y, yp: d1 });
+            L.push(String.raw`y'_{${k}} = f(${fmt(x)},\, ${fmt(y)}) = ${col(C_IN, fmt(d1))}`);
+            L.push(String.raw`y''_{${k}} = ${col(C_IN, fmt(d2))}`);
+            yn = y + h * d1 + h * h / 2 * d2;
+            let sub = String.raw`${fmt(y)} + ${fmt(h)}${col(C_IN, p(d1))} + \frac{${fmt(h)}^2}{2}${col(C_IN, p(d2))}`;
+            if (m === 'taylor3') {
+                const d3 = D.y3.evaluate({ x, y, yp: d1, ypp: d2 });
+                L.push(String.raw`y'''_{${k}} = ${col(C_IN, fmt(d3))}`);
+                yn += h ** 3 / 6 * d3;
+                sub += String.raw` + \frac{${fmt(h)}^3}{6}${col(C_IN, p(d3))}`;
+            }
+            L.push(String.raw`y_{${k1}} = ${sub} = ${res(yn)}`);
+        }
+        if (!isFinite(yn)) throw `The value became undefined at step ${k + 1} (x = ${fmt(xn)}). Check f or use a smaller h.`;
+        x = xn; y = yn;
+        xs.push(x); ys.push(y); steps.push({ k, x0: xs[k], x1: x, lines: L });
+    }
+    return { xs, ys, steps };
+}
+
+function solveSecond(m, F, D, x0, y0, yp0, h, N) {
+    const xs = [x0], ys = [y0], yps = [yp0], steps = [];
+    let x = x0, y = y0, yp = yp0;
+    for (let k = 0; k < N; k++) {
+        const L = [], k1 = k + 1, xn = x0 + (k + 1) * h;
+        const d2 = F(x, y, yp);
+        L.push(String.raw`y''_{${k}} = f(${fmt(x)},\, ${fmt(y)},\, ${fmt(yp)}) = ${col(C_IN, fmt(d2))}`);
+        let yn = y + h * yp + h * h / 2 * d2;
+        let ypn = yp + h * d2;
+        let sY = String.raw`${fmt(y)} + ${fmt(h)}${col(C_IN, p(yp))} + \frac{${fmt(h)}^2}{2}${col(C_IN, p(d2))}`;
+        let sP = String.raw`${fmt(yp)} + ${fmt(h)}${col(C_IN, p(d2))}`;
+        if (m === 'taylor3') {
+            const d3 = D.y3.evaluate({ x, y, yp, ypp: d2 });
+            L.push(String.raw`y'''_{${k}} = ${col(C_IN, fmt(d3))}`);
+            yn += h ** 3 / 6 * d3; ypn += h * h / 2 * d3;
+            sY += String.raw` + \frac{${fmt(h)}^3}{6}${col(C_IN, p(d3))}`;
+            sP += String.raw` + \frac{${fmt(h)}^2}{2}${col(C_IN, p(d3))}`;
+        }
+        L.push(String.raw`y_{${k1}} = ${sY} = ${res(yn)}`);
+        L.push(String.raw`y'_{${k1}} = ${sP} = ${col(C_MID, String.raw`\mathbf{${fmt(ypn)}}`)}`);
+        if (!isFinite(yn)) throw `The value became undefined at step ${k + 1}. Check f or use a smaller h.`;
+        x = xn; y = yn; yp = ypn;
+        xs.push(x); ys.push(y); yps.push(yp); steps.push({ k, x0: xs[k], x1: x, lines: L });
+    }
+    return { xs, ys, yps, steps };
+}
+
+// ---------- main ----------
+function solve() {
+    hideError();
+    const o = order();
+    const x0 = parseFloat(document.getElementById('x0').value);
+    const y0 = parseFloat(document.getElementById('y0').value);
+    const yp0 = parseFloat(document.getElementById('yp0').value);
+    const h = parseFloat(document.getElementById('hInput').value);
+    const xe = parseFloat(document.getElementById('xEnd').value);
+    if ([x0, y0, h, xe].some(isNaN) || (o === 2 && isNaN(yp0))) { showError('Fill in x₀, the initial value(s), h and the target x.'); return; }
+    if (h <= 0) { showError('The step size h must be positive.'); return; }
+    const Nr = (xe - x0) / h, N = Math.round(Nr);
+    if (N < 1 || Math.abs(Nr - N) > 1e-9) { showError('The target x must be x₀ + N·h for a whole number N ≥ 1. Change h or the target x.'); return; }
+    if (N > 200) { showError('That is more than 200 steps. Use a larger h.'); return; }
+
+    // parse f
+    let fNode, fC;
+    try { fNode = math.parse(clean(document.getElementById('funcStr').value)); fC = fNode.compile(); fC.evaluate({ x: x0, y: y0, yp: yp0 || 0 }); }
+    catch (e) { showError(`Couldn't read the equation. Use * for multiplication and ^ for powers${o === 2 ? ", and write y′ as y'" : ''}.`); return; }
+    const F = o === 1 ? (x, y) => fC.evaluate({ x, y }) : (x, y, yp) => fC.evaluate({ x, y, yp });
+
+    // exact (optional)
+    let exact = null;
+    const exStr = document.getElementById('exactStr').value.trim();
+    if (exStr) {
+        try { const ec = math.parse(exStr).compile(); ec.evaluate({ x: x0 }); exact = x => ec.evaluate({ x }); }
+        catch (e) { showError("Couldn't read the exact solution. Leave it empty or write it in terms of x only."); return; }
+    }
+
+    const sel = document.getElementById('methodSelect').value;
+    const methods = sel === 'all' ? METHODS[o].map(v => v[0]).filter(v => v !== 'all') : [sel];
+    const needsTaylor = methods.some(m => m.startsWith('taylor'));
+    const needsThird = methods.includes('taylor3');
+
+    // derivatives for Taylor
+    let D = {};
+    const dSec = document.getElementById('derivSection');
+    dSec.classList.toggle('hidden', !needsTaylor);
+    document.querySelectorAll('.secNum').forEach((el, i) => el.textContent = (needsTaylor ? 3 : 2) + i);
+    try {
+        if (needsTaylor) {
+            const fs = fNode.toString();
+            const lines = [];
+            if (o === 1) {
+                const fx = math.derivative(fNode, 'x').toString(), fy = math.derivative(fNode, 'y').toString();
+                D.y2 = simp(`(${fx}) + (${fy}) * yp`);
+                lines.push(String.raw`y' &= ${toTex(fNode)}`);
+                lines.push(String.raw`y'' &= \frac{d}{dx}\big(y'\big) = ${toTex(D.y2)}`);
+                if (needsThird) {
+                    const s2 = D.y2.toString();
+                    const ax = math.derivative(s2, 'x').toString(), ay = math.derivative(s2, 'y').toString(), ap = math.derivative(s2, 'yp').toString();
+                    D.y3 = simp(`(${ax}) + (${ay}) * yp + (${ap}) * ypp`);
+                    lines.push(String.raw`y''' &= \frac{d}{dx}\big(y''\big) = ${toTex(D.y3)}`);
+                }
+            } else {
+                lines.push(String.raw`y'' &= ${toTex(fNode)}`);
+                if (needsThird) {
+                    const ax = math.derivative(fNode, 'x').toString(), ay = math.derivative(fNode, 'y').toString(), ap = math.derivative(fNode, 'yp').toString();
+                    D.y3 = simp(`(${ax}) + (${ay}) * yp + (${ap}) * ypp`);
+                    lines.push(String.raw`y''' &= \frac{d}{dx}\big(y''\big) = ${toTex(D.y3)}`);
+                } else {
+                    lines.push(String.raw`&\text{(second order only needs } y' \text{ and } y'' \text{, no differentiation)}`);
+                }
+            }
+            D.y2 && (D.y2 = D.y2.compile ? D.y2.compile() : D.y2);
+            D.y3 && (D.y3 = D.y3.compile ? D.y3.compile() : D.y3);
+            renderMath('derivBox', String.raw`\begin{aligned}` + lines.join(String.raw`\\[6pt]`) + String.raw`\end{aligned}`);
+        }
+    } catch (e) { showError("Couldn't differentiate this equation for the Taylor method. Try writing it with simpler functions."); return; }
+
+    // run
+    const runs = {};
+    try {
+        methods.forEach(m => runs[m] = o === 1 ? solveFirst(m, F, D, x0, y0, h, N) : solveSecond(m, F, D, x0, y0, yp0, h, N));
+    } catch (e) { showError(typeof e === 'string' ? e : 'The calculation failed. Check the equation and the inputs.'); return; }
+
+    // 1. formulas
+    const fb = document.getElementById('formulaBox'); fb.innerHTML = '';
+    methods.forEach(m => {
+        const c = document.createElement('div');
+        c.className = 'bg-white p-3 rounded border shadow-sm overflow-x-auto';
+        c.innerHTML = `<div class="font-semibold mb-1" style="color:${COLOR[m]}">${NAME[m]}</div><div class="tex text-lg"></div>`;
+        fb.appendChild(c);
+        renderMath(c.querySelector('.tex'), theoryTex(m, o));
+    });
+
+    // 3. steps
+    const sb = document.getElementById('stepsBox'); sb.innerHTML = '';
+    methods.forEach(m => {
+        const wrap = document.createElement('div');
+        if (methods.length > 1) wrap.innerHTML = `<div class="font-semibold mt-2" style="color:${COLOR[m]}">${NAME[m]}</div>`;
+        runs[m].steps.forEach((s, i) => {
+            const d = document.createElement('details');
+            d.className = 'bg-white rounded border shadow-sm mt-2';
+            if (i === 0 && methods.length === 1) d.open = true;
+            d.innerHTML = `<summary class="p-3 font-medium text-gray-700">Step ${s.k + 1}: from x = ${fmt(s.x0)} to x = ${fmt(s.x1)}
+                <span class="text-sm font-normal text-gray-500">→ y = ${fmt(runs[m].ys[s.k + 1])}</span></summary>
+                <div class="tex px-3 pb-3 overflow-x-auto text-lg"></div>`;
+            wrap.appendChild(d);
+            renderMath(d.querySelector('.tex'), String.raw`\begin{aligned}` + s.lines.map(l => '&' + l).join(String.raw`\\[6pt]`) + String.raw`\end{aligned}`);
+        });
+        sb.appendChild(wrap);
+    });
+
+    // 4. table
+    const xs = runs[methods[0]].xs;
+    let t = `<table><tr><th>k</th><th>x<sub>k</sub></th>`;
+    methods.forEach(m => t += `<th style="color:${COLOR[m]}">${methods.length > 1 ? NAME[m] : 'y<sub>k</sub>'}</th>`);
+    if (o === 2 && methods.length === 1) t += `<th>y′<sub>k</sub></th>`;
+    if (exact) t += `<th>exact y(x<sub>k</sub>)</th>` + (methods.length === 1 ? `<th>|error|</th>` : '');
+    t += `</tr>`;
+    xs.forEach((x, k) => {
+        t += `<tr class="${k === xs.length - 1 ? 'final' : ''}"><td>${k}</td><td>${fmt(x)}</td>`;
+        methods.forEach(m => t += `<td>${fmt(runs[m].ys[k])}</td>`);
+        if (o === 2 && methods.length === 1) t += `<td>${fmt(runs[methods[0]].yps[k])}</td>`;
+        if (exact) {
+            const ex = exact(x);
+            t += `<td>${fmt(ex)}</td>`;
+            if (methods.length === 1) t += `<td>${fmt(Math.abs(ex - runs[methods[0]].ys[k]), Math.max(dec() + 2, 6))}</td>`;
+        }
+        t += `</tr>`;
+    });
+    t += `</table>`;
+    document.getElementById('tableBox').innerHTML = t;
+
+    // 5. final answer
+    let fa = `<div class="text-sm text-gray-600 mb-2">y(${fmt(xe)}) using h = ${fmt(h)} (${N} step${N > 1 ? 's' : ''}):</div>`;
+    const exEnd = exact ? exact(xe) : null;
+    methods.forEach(m => {
+        const v = runs[m].ys[N];
+        fa += `<div class="flex flex-wrap items-baseline justify-between gap-2 py-1 border-b border-green-100 last:border-0">
+            <span class="font-semibold" style="color:${COLOR[m]}">${NAME[m]}</span>
+            <span class="text-xl font-bold">${fmt(v)}</span>
+            ${exact ? `<span class="text-sm text-gray-600 w-full sm:w-auto">error = ${fmt(Math.abs(exEnd - v), Math.max(dec() + 2, 6))}</span>` : ''}</div>`;
+    });
+    if (exact) fa += `<div class="mt-2 text-sm">Exact value: <b>${fmt(exEnd, dec() + 2)}</b></div>`;
+    document.getElementById('finalAnswer').innerHTML = fa;
+
+    document.getElementById('resultsContainer').classList.remove('hidden');
+    document.getElementById('placeholderMsg').classList.add('hidden');
+    drawGraph(runs, methods, exact, x0, xe);
+}
+
+// ---------- graph ----------
+function drawGraph(runs, methods, exact, a, b) {
+    document.getElementById('graphContainer').classList.remove('hidden');
+    document.getElementById('graphNote').textContent = exact
+        ? 'The dark curve is the exact solution. The points are the values computed by each method; the closer they sit to the curve, the more accurate the method.'
+        : 'The points are the values computed at each step, joined by straight lines.';
+    const ctx = document.getElementById('odeChart').getContext('2d');
+    if (myChart) myChart.destroy();
+    const ds = [];
+    if (exact) {
+        const pts = [];
+        for (let i = 0; i <= 100; i++) { const x = a + (b - a) * i / 100; pts.push({ x, y: exact(x) }); }
+        ds.push({ label: 'Exact solution', data: pts, borderColor: '#1e3a8a', borderWidth: 2.5, pointRadius: 0, tension: 0.3 });
+    }
+    methods.forEach(m => ds.push({
+        label: NAME[m], data: runs[m].xs.map((x, i) => ({ x, y: runs[m].ys[i] })),
+        borderColor: COLOR[m], backgroundColor: COLOR[m], borderWidth: 2, borderDash: [6, 4], pointRadius: 5, tension: 0
+    }));
+    myChart = new Chart(ctx, {
+        type: 'line',
+        data: { datasets: ds },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            scales: { x: { type: 'linear', title: { display: true, text: 'x' } }, y: { title: { display: true, text: 'y' } } },
+            plugins: {
+                legend: { position: 'top' },
+                tooltip: { callbacks: { label: c => `${c.dataset.label}: (${fmt(c.parsed.x)}, ${fmt(c.parsed.y)})` } }
+            }
+        }
+    });
+}
+
+updateOrder(true);
+</script>
+</body>
+</html>
